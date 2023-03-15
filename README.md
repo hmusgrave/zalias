@@ -18,9 +18,8 @@ Zig has a package manager!!! Do something like the following.
 
     .dependencies = .{
         .zalias = .{
-            .name = "zalias",
-	   .url = "https://github.com/hmusgrave/zalias/archive/refs/tags/z11-0.0.0.tar.gz",
-            .hash = "12201bb45374f0ac377810370d3736bf95fcab688a6d6be47f0dd5d4f622cd0e23a6",
+            .url = "https://github.com/hmusgrave/zalias/archive/refs/tags/z11-0.2.0.tar.gz",
+            .hash = "1220bb80981d83ffae53dd8d0636ceba9d621850292a301d84411120bfa38ec0ae4b",
         },
     },
 }
