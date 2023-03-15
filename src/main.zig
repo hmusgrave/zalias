@@ -65,6 +65,10 @@ const AliasOpt = struct {
     pub fn weights_are_validated(comptime _: ?type) type {
         return zkwargs.Default(false);
     }
+
+    pub fn length_is_validated(comptime _: ?type) type {
+        return zkwargs.Default(false);
+    }
 };
 
 fn Entry(comptime U: type, comptime F: type) type {
@@ -74,11 +78,11 @@ fn Entry(comptime U: type, comptime F: type) type {
     };
 }
 
-fn Alias(comptime F: type) type {
+fn Alias(comptime F: type, comptime I: type) type {
     // Great resource for Vose's Alias Method:
     // https://www.keithschwarz.com/darts-dice-coins/
     return struct {
-        entries: []Entry(usize, F),
+        entries: []Entry(I, F),
         allocator: Allocator,
 
         pub fn init(allocator: Allocator, weights: []F, _kwargs: anytype) !@This() {
@@ -100,9 +104,18 @@ fn Alias(comptime F: type) type {
             // .weights_are_validated(false):
             //   - are the weights already guaranteed to be non-empty, non-negative, and
             //     contain at least one positive member?
+            // .length_is_validated(false):
+            //   - is the length of `weights` at least one less than the max length which
+            //     could be indexed by type `I`?
             var kwargs = zkwargs.Options(AliasOpt).parse(_kwargs);
 
             const N = weights.len;
+            const U: I = std.math.maxInt(I);
+
+            if (!kwargs.length_is_validated) {
+                if (N >= U)
+                    return error.WeightLengthExceedsIndexType;
+            }
 
             if (!kwargs.weights_are_validated) {
                 if (N == 0)
@@ -119,12 +132,11 @@ fn Alias(comptime F: type) type {
                     return error.CannotNormalizeToOne;
             }
 
-            var entries = try allocator.alloc(Entry(usize, F), weights.len);
+            var entries = try allocator.alloc(Entry(I, F), weights.len);
             errdefer allocator.free(entries);
 
             // TODO: pdv on the fact that we're taking up
             // a sentinel value
-            const U: usize = std.math.maxInt(usize);
             var less_head = U;
             var more_head = U;
 
@@ -146,7 +158,7 @@ fn Alias(comptime F: type) type {
                 entries[i].prob = p;
                 var ptr = if (p < 1) &less_head else &more_head;
                 entries[i].alias = ptr.*;
-                ptr.* = i;
+                ptr.* = @intCast(I, i);
             }
 
             // main work loop, walk linked lists and fill alias
@@ -200,7 +212,7 @@ test "can mutate" {
     const allocator = std.testing.allocator;
     const F = f32;
     var probs = [_]F{ 1, 2, 3, 4 };
-    var table = try Alias(F).init(allocator, probs[0..], .{ .can_mutate = true });
+    var table = try Alias(F, usize).init(allocator, probs[0..], .{ .can_mutate = true });
     defer table.deinit();
     var total = [_]usize{ 0, 0, 0, 0 };
     const N: usize = 10000;
@@ -220,7 +232,7 @@ test "works normalized" {
     const allocator = std.testing.allocator;
     const F = f32;
     var probs = [_]F{ 0.1, 0.2, 0.3, 0.4 };
-    var table = try Alias(F).init(allocator, probs[0..], .{ .pre_normalized = true });
+    var table = try Alias(F, usize).init(allocator, probs[0..], .{ .pre_normalized = true });
     defer table.deinit();
     var total = [_]usize{ 0, 0, 0, 0 };
     const N: usize = 10000;
@@ -240,7 +252,7 @@ test "works scaled" {
     const allocator = std.testing.allocator;
     const F = f32;
     var probs = [_]F{ 0.4, 0.8, 1.2, 1.6 };
-    var table = try Alias(F).init(allocator, probs[0..], .{ .pre_scaled = true });
+    var table = try Alias(F, usize).init(allocator, probs[0..], .{ .pre_scaled = true });
     defer table.deinit();
     var total = [_]usize{ 0, 0, 0, 0 };
     const N: usize = 10000;
@@ -260,7 +272,27 @@ test "valiation not needed" {
     const allocator = std.testing.allocator;
     const F = f32;
     var probs = [_]F{ 0.4, 0.8, 1.2, 1.6 };
-    var table = try Alias(F).init(allocator, probs[0..], .{ .weights_are_validated = true });
+    var table = try Alias(F, usize).init(allocator, probs[0..], .{ .weights_are_validated = true });
+    defer table.deinit();
+    var total = [_]usize{ 0, 0, 0, 0 };
+    const N: usize = 10000;
+    for (0..N) |_|
+        total[table.generate(rnd.random())] += 1;
+    var freq: [total.len]F = undefined;
+    for (freq[0..], total) |*f, t|
+        f.* = @intToFloat(F, t) / @intToFloat(F, N);
+    try std.testing.expectApproxEqAbs(@as(F, 0.1), freq[0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.2), freq[1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.3), freq[2], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.4), freq[3], 0.01);
+}
+
+test "other index types" {
+    var rnd = RndGen.init(0);
+    const allocator = std.testing.allocator;
+    const F = f32;
+    var probs = [_]F{ 0.4, 0.8, 1.2, 1.6 };
+    var table = try Alias(F, u32).init(allocator, probs[0..], .{ .weights_are_validated = true });
     defer table.deinit();
     var total = [_]usize{ 0, 0, 0, 0 };
     const N: usize = 10000;
