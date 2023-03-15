@@ -141,15 +141,13 @@ fn AliasList(comptime F: type) type {
             for (weights, 0..) |w, i| {
                 const p = w * scalar;
                 prob[i] = p;
-                if (p < 1) {
-                    alias[i] = less_head;
-                    less_head = i;
-                } else {
-                    alias[i] = more_head;
-                    more_head = i;
-                }
+                var ptr = if (p < 1) &less_head else &more_head;
+                alias[i] = ptr.*;
+                ptr.* = i;
             }
 
+            // main work loop, walk linked lists and fill alias
+            // table as you empty where they list used to be
             while (less_head != U and more_head != U) {
                 const l = less_head;
                 const g = more_head;
@@ -157,20 +155,19 @@ fn AliasList(comptime F: type) type {
                 more_head = alias[more_head];
                 alias[l] = g;
                 prob[g] = (prob[g] + prob[l]) - 1;
-                if (prob[g] < 1) {
-                    alias[g] = less_head;
-                    less_head = g;
-                } else {
-                    alias[g] = more_head;
-                    more_head = g;
-                }
+                var ptr = if (prob[g] < 1) &less_head else &more_head;
+                alias[g] = ptr.*;
+                ptr.* = g;
             }
 
+            // stragglers from the main work loop
             while (more_head != U) {
                 defer more_head = alias[more_head];
                 prob[more_head] = 1;
             }
 
+            // more stragglers, only due to floating point
+            // error
             while (less_head != U) {
                 defer less_head = alias[less_head];
                 prob[less_head] = 1;
