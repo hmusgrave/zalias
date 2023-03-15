@@ -5,9 +5,11 @@ const RndGen = std.rand.DefaultPrng;
 
 const zkwargs = @import("zkwargs");
 
-fn kahan(comptime F: type, data: []F) F {
-    var total: F = 0;
-    var comp: F = 0;
+fn kahan_scalar(comptime F: type, data: []F, _total: F, _comp: F) F {
+    // naive kahan summation, directly transcribing
+    // any blog on the topic
+    var total = _total;
+    var comp = _comp;
 
     for (data) |x| {
         const corrected = x - comp;
@@ -17,6 +19,34 @@ fn kahan(comptime F: type, data: []F) F {
     }
 
     return total;
+}
+
+fn kahan_simd(comptime F: type, data: []F, comptime V: usize) F {
+    // naive kahan summation, applied to each "lane" of data
+    // then use scalar methods for stragglers at the end
+    var total = @splat(V, @as(F, 0));
+    var comp = @splat(V, @as(F, 0));
+    var i: usize = 0;
+    while (i + V < data.len) : (i += V) {
+        const _x: [V]F = data[i..][0..V].*;
+        const x: @Vector(V, F) = _x;
+        const corrected = x - comp;
+        const temp_total = total + corrected;
+        comp = (temp_total - total) - corrected;
+        total = temp_total;
+    }
+
+    return kahan_scalar(F, data[@max(V, data.len) - V ..], @reduce(.Add, total), @reduce(.Add, comp));
+}
+
+fn kahan(comptime F: type, data: []F) F {
+    // TODO: more principled approach to vector lengths, maybe
+    // requiring a different function signature to make that
+    // happen
+    //
+    // Big enough for f16 on avx512 though, and not a huge amount
+    // of overhead so that smallish inputs aren't too slow
+    return kahan_simd(F, data, 32);
 }
 
 const AliasOpt = struct {
