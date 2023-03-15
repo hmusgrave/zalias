@@ -167,15 +167,13 @@ fn AliasList(comptime F: type) type {
             }
 
             while (more_head != U) {
-                const g = more_head;
-                more_head = alias[more_head];
-                prob[g] = 1;
+                defer more_head = alias[more_head];
+                prob[more_head] = 1;
             }
 
             while (less_head != U) {
-                const l = less_head;
-                less_head = alias[less_head];
-                prob[l] = 1;
+                defer less_head = alias[less_head];
+                prob[less_head] = 1;
             }
 
             return @This(){
