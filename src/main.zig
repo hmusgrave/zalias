@@ -67,6 +67,137 @@ const AliasOpt = struct {
     }
 };
 
+fn AliasList(comptime F: type) type {
+    // Great resource for Vose's Alias Method:
+    // https://www.keithschwarz.com/darts-dice-coins/
+    return struct {
+        alias: []usize,
+        prob: []F,
+        allocator: Allocator,
+
+        pub fn init(allocator: Allocator, weights: []F, _kwargs: anytype) !@This() {
+            // weights:
+            //   - w[i] == 0 implies i will not be selected
+            //   - w[i] == w[k] * z implies i is z times more likely to be selected than k
+            //   - at least one entry must be positive
+            //   - no entries may be negative
+            //
+            // _kwargs:
+            // ========
+            // .can_mutate (false):
+            //   - can we mutate the weights, or must we create an auxilliary buffer?
+            // .pre_normalized (false):
+            //   - (only used if !pre_scaled) do the weights sum to 1.0, or do we need to
+            //     estimate the sum?
+            // .pre_scaled (false):
+            //   - are the (normalized) weights already multiplied by weights.len?
+            // .weights_are_validated(false):
+            //   - are the weights already guaranteed to be non-empty, non-negative, and
+            //     contain at least one positive member?
+            var kwargs = zkwargs.Options(AliasOpt).parse(_kwargs);
+
+            const N = weights.len;
+
+            if (!kwargs.weights_are_validated) {
+                if (N == 0)
+                    return error.NoWeights;
+
+                var any_pos = false;
+                for (weights) |w| {
+                    any_pos = any_pos or w > 0;
+                    if (w < 0)
+                        return error.NegativeWeight;
+                }
+
+                if (!any_pos)
+                    return error.CannotNormalizeToOne;
+            }
+
+            var alias = try allocator.alloc(usize, N);
+            errdefer allocator.free(alias);
+
+            var prob = try allocator.alloc(F, N);
+            errdefer allocator.free(prob);
+
+            // TODO: pdv on the fact that we're taking up
+            // a sentinel value
+            const U: usize = std.math.maxInt(usize);
+            var less_head = U;
+            var more_head = U;
+
+            // compute adjusted probability scalar, and when .pre_scaled
+            // is comptime-known this should get inlined into no-ops with
+            // the multiply by a constant 1 later in this function
+            var scalar: F = 1;
+            if (!kwargs.pre_scaled) {
+                if (!kwargs.pre_normalized)
+                    scalar /= kahan(F, weights[0..]);
+                scalar *= @intToFloat(F, weights.len);
+            }
+
+            // initialize small/large buffers -- in-place in the result
+            // buffer, abusing the `alias` as a backward-pointing linked
+            // list, to be overwritten with the real alias later
+            for (weights, 0..) |w, i| {
+                const p = w * scalar;
+                prob[i] = p;
+                if (p < 1) {
+                    alias[i] = less_head;
+                    less_head = i;
+                } else {
+                    alias[i] = more_head;
+                    more_head = i;
+                }
+            }
+
+            while (less_head != U and more_head != U) {
+                const l = less_head;
+                const g = more_head;
+                less_head = alias[less_head];
+                more_head = alias[more_head];
+                alias[l] = g;
+                prob[g] = (prob[g] + prob[l]) - 1;
+                if (prob[g] < 1) {
+                    alias[g] = less_head;
+                    less_head = g;
+                } else {
+                    alias[g] = more_head;
+                    more_head = g;
+                }
+            }
+
+            while (more_head != U) {
+                const g = more_head;
+                more_head = alias[more_head];
+                prob[g] = 1;
+            }
+
+            while (less_head != U) {
+                const l = less_head;
+                less_head = alias[less_head];
+                prob[l] = 1;
+            }
+
+            return @This(){
+                .alias = alias,
+                .prob = prob,
+                .allocator = allocator,
+            };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.allocator.free(self.alias);
+            self.allocator.free(self.prob);
+        }
+
+        pub fn generate(self: *@This(), rand: Random) usize {
+            const i = rand.uintLessThan(usize, self.prob.len);
+            const f = rand.float(F);
+            return if (f < self.prob[i]) i else self.alias[i];
+        }
+    };
+}
+
 fn Alias(comptime F: type) type {
     // Great resource for Vose's Alias Method:
     // https://www.keithschwarz.com/darts-dice-coins/
@@ -266,6 +397,26 @@ test "works scaled" {
     const F = f32;
     var probs = [_]F{ 0.4, 0.8, 1.2, 1.6 };
     var table = try Alias(F).init(allocator, probs[0..], .{ .pre_scaled = true });
+    defer table.deinit();
+    var total = [_]usize{ 0, 0, 0, 0 };
+    const N: usize = 10000;
+    for (0..N) |_|
+        total[table.generate(rnd.random())] += 1;
+    var freq: [total.len]F = undefined;
+    for (freq[0..], total) |*f, t|
+        f.* = @intToFloat(F, t) / @intToFloat(F, N);
+    try std.testing.expectApproxEqAbs(@as(F, 0.1), freq[0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.2), freq[1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.3), freq[2], 0.01);
+    try std.testing.expectApproxEqAbs(@as(F, 0.4), freq[3], 0.01);
+}
+
+test "list valiation not needed" {
+    var rnd = RndGen.init(0);
+    const allocator = std.testing.allocator;
+    const F = f32;
+    var probs = [_]F{ 0.4, 0.8, 1.2, 1.6 };
+    var table = try AliasList(F).init(allocator, probs[0..], .{ .weights_are_validated = true });
     defer table.deinit();
     var total = [_]usize{ 0, 0, 0, 0 };
     const N: usize = 10000;
