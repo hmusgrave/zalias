@@ -67,12 +67,18 @@ const AliasOpt = struct {
     }
 };
 
+fn Entry(comptime U: type, comptime F: type) type {
+    return struct {
+        alias: U,
+        prob: F,
+    };
+}
+
 fn Alias(comptime F: type) type {
     // Great resource for Vose's Alias Method:
     // https://www.keithschwarz.com/darts-dice-coins/
     return struct {
-        alias: []usize,
-        prob: []F,
+        entries: []Entry(usize, F),
         allocator: Allocator,
 
         pub fn init(allocator: Allocator, weights: []F, _kwargs: anytype) !@This() {
@@ -113,11 +119,8 @@ fn Alias(comptime F: type) type {
                     return error.CannotNormalizeToOne;
             }
 
-            var alias = try allocator.alloc(usize, N);
-            errdefer allocator.free(alias);
-
-            var prob = try allocator.alloc(F, N);
-            errdefer allocator.free(prob);
+            var entries = try allocator.alloc(Entry(usize, F), weights.len);
+            errdefer allocator.free(entries);
 
             // TODO: pdv on the fact that we're taking up
             // a sentinel value
@@ -140,9 +143,9 @@ fn Alias(comptime F: type) type {
             // list, to be overwritten with the real alias later
             for (weights, 0..) |w, i| {
                 const p = w * scalar;
-                prob[i] = p;
+                entries[i].prob = p;
                 var ptr = if (p < 1) &less_head else &more_head;
-                alias[i] = ptr.*;
+                entries[i].alias = ptr.*;
                 ptr.* = i;
             }
 
@@ -151,44 +154,43 @@ fn Alias(comptime F: type) type {
             while (less_head != U and more_head != U) {
                 const l = less_head;
                 const g = more_head;
-                less_head = alias[less_head];
-                more_head = alias[more_head];
-                alias[l] = g;
-                prob[g] = (prob[g] + prob[l]) - 1;
-                var ptr = if (prob[g] < 1) &less_head else &more_head;
-                alias[g] = ptr.*;
+                less_head = entries[less_head].alias;
+                more_head = entries[more_head].alias;
+                entries[l].alias = g;
+                entries[g].prob = (entries[g].prob + entries[l].prob) - 1;
+                var ptr = if (entries[g].prob < 1) &less_head else &more_head;
+                entries[g].alias = ptr.*;
                 ptr.* = g;
             }
 
             // stragglers from the main work loop
             while (more_head != U) {
-                defer more_head = alias[more_head];
-                prob[more_head] = 1;
+                defer more_head = entries[more_head].alias;
+                entries[more_head].prob = 1;
             }
 
             // more stragglers, only due to floating point
             // error
             while (less_head != U) {
-                defer less_head = alias[less_head];
-                prob[less_head] = 1;
+                defer less_head = entries[less_head].alias;
+                entries[less_head].prob = 1;
             }
 
             return @This(){
-                .alias = alias,
-                .prob = prob,
+                .entries = entries,
                 .allocator = allocator,
             };
         }
 
         pub fn deinit(self: *@This()) void {
-            self.allocator.free(self.alias);
-            self.allocator.free(self.prob);
+            self.allocator.free(self.entries);
         }
 
         pub fn generate(self: *@This(), rand: Random) usize {
-            const i = rand.uintLessThan(usize, self.prob.len);
+            const i = rand.uintLessThan(usize, self.entries.len);
             const f = rand.float(F);
-            return if (f < self.prob[i]) i else self.alias[i];
+            const entry = self.entries[i];
+            return if (f < entry.prob) i else entry.alias;
         }
     };
 }
