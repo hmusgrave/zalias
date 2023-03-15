@@ -50,7 +50,7 @@ test "something" {
 
     const F = f32;
     var probs = [_]F{ 1, 2, 3, 4 };
-    var table = try Alias(F).init(allocator, probs[0..], .{
+    var table = try Alias(F, u8).init(allocator, probs[0..], .{
     	// - all of these arguments are optional
 	// - all default to false
 	// - if the values are compile-time known then generated code is
