@@ -26,6 +26,12 @@ pub fn build(b: *std.Build) void {
     });
     const zkwargs_mod = zkwargs_pkg.module("zkwargs");
 
+    const pdv_pkg = b.dependency("pdv", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const pdv_mod = pdv_pkg.module("pdv");
+
     const lib = b.addStaticLibrary(.{
         .name = "zalias",
         // In this case the main source file is merely a path, however, in more
@@ -35,6 +41,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib.addModule("zkwargs", zkwargs_mod);
+    lib.addModule("pdv", pdv_mod);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -48,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     main_tests.addModule("zkwargs", zkwargs_mod);
+    main_tests.addModule("pdv", pdv_mod);
 
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build test`

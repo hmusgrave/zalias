@@ -49,16 +49,26 @@ test "something" {
     const allocator = std.testing.allocator;
 
     const F = f32;
-    var probs = [_]F{ 1, 2, 3, 4 };
-    var table = try Alias(F, u8).init(allocator, probs[0..], .{
+    const weights = [_]F{ 1, 2, 3, 4 };
+
+    const Table = Alias(F, u8)
+
+    // We're using the type system to ensure that we only try to construct
+    // a table if this is a valid probability distribution (weights are non-negative
+    // and can be scaled by a positive scalar to sum to 1). If you know your
+    // weights satisfy those constraints then you can choose to bypass
+    // the check.
+    // 
+    // const validated_weights = Table.pinky_promise_weights_are_valid(weights[0..])
+    const validated_weights = try Table.validate_weights(weights[0..]);
+
+    var table = try Alias(F, u8).init(allocator, validated_weights, .{
     	// - all of these arguments are optional
 	// - all default to false
 	// - if the values are compile-time known then generated code is
  	//   suitably smaller/faster
-    	.can_mutate = false,
-	.pre_normalized = false,
-    	.pre_scaled = false,
-	.weights_are_validated = false,
+	.pre_normalized = false,  // weights sum to 1 (ignored if pre_scaled is true)
+    	.pre_scaled = false,  // weights sum to N
     });
     defer table.deinit();
 
@@ -79,4 +89,4 @@ test "something" {
 ```
 
 ## Status
-Work has me pretty busy lately, so I might have a few weeks lead time on any responses. Targets Zig 0.11.
+Work has me pretty busy lately, so I might have a few weeks lead time on any responses. Targets Zig 0.11. Note that the minimum size in the current implementation is approximately a cache line, which might not be suitable for holding many small distributions.
