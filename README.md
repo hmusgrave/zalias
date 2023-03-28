@@ -88,4 +88,4 @@ test "something" {
 ```
 
 ## Status
-Work has me pretty busy lately, so I might have a few weeks lead time on any responses. Targets Zig 0.11. Note that the minimum size in the current implementation is approximately a cache line, which might not be suitable for holding many small distributions.
+Targets Zig 0.11. Note that the minimum size in the current implementation is approximately a cache line, which might not be suitable for holding many small distributions.
